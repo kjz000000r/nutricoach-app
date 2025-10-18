@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>NutriCoach Mini App</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: var(--tg-theme-bg-color, #f0f2f5);
+            color: var(--tg-theme-text-color, #000);
+            padding-bottom: 80px;
+        }
+        .fade-enter-active, .fade-leave-active {
+            transition: opacity 0.3s;
+        }
+        .fade-enter-from, .fade-leave-to {
+            opacity: 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- Loading Screen -->
+        <div v-if="loading" class="fixed inset-0 flex items-center justify-center bg-gradient-to-br from-green-50 to-blue-50">
+            <div class="text-center">
+                <div class="animate-spin rounded-full h-16 w-16 border-4 border-green-500 border-t-transparent mx-auto mb-4"></div>
+                <p class="text-gray-600 text-lg">Загрузка...</p>
+            </div>
+        </div>
+
+        <!-- Main App -->
+        <div v-else>
+            <!-- Header -->
+            <header class="bg-white shadow-sm sticky top-0 z-50">
+                <div class="px-4 py-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h1 class="text-2xl font-bold bg-gradient-to-r from-green-600 to-blue-600 bg-clip-text text-transparent">
+                                NutriCoach
+                            </h1>
+                            <p class="text-sm text-gray-500">{{ user.first_name || 'Пользователь' }}</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <div class="px-3 py-1.5 bg-green-100 rounded-full flex items-center gap-1">
+                                <span class="text-lg">🧪</span>
+                                <span class="text-sm font-semibold text-green-700">{{ labsCredits }}</span>
+                            </div>
+                            <div class="px-3 py-1.5 bg-yellow-100 rounded-full flex items-center gap-1">
+                                <span class="text-lg">🏆</span>
+                                <span class="text-sm font-semibold text-yellow-700">{{ achievements }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Content -->
+            <main class="p-4">
+                <!-- Diary Tab -->
+                <transition name="fade" mode="out-in">
+                    <div v-if="activeTab === 'diary'" key="diary" class="space-y-4">
+                        <!-- Today Stats -->
+                        <div class="bg-white rounded-2xl shadow-lg p-5">
+                            <h2 class="text-lg font-bold mb-4 text-gray-800">📊 Сегодня</h2>
+                            <div class="grid grid-cols-4 gap-3">
+                                <div class="text-center">
+                                    <div class="text-3xl font-bold text-green-600">{{ stats.calories }}</div>
+                                    <div class="text-xs text-gray-500 mt-1">ккал</div>
+                                </div>
+                                <div class="text-center">
+                                    <div class="text-3xl font-bold text-blue-600">{{ Math.round(stats.proteins) }}</div>
+                                    <div class="text-xs text-gray-500 mt-1">белки</div>
+                                </div>
+                                <div class="text-center">
+                                    <div class="text-3xl font-bold text-yellow-600">{{ Math.round(stats.fats) }}</div>
+                                    <div class="text-xs text-gray-500 mt-1">жиры</div>
+                                </div>
+                                <div class="text-center">
+                                    <div class="text-3xl font-bold text-purple-600">{{ Math.round(stats.carbs) }}</div>
+                                    <div class="text-xs text-gray-500 mt-1">углев</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Add Meal -->
+                        <div class="bg-white rounded-2xl shadow-lg p-5">
+                            <h3 class="text-sm font-bold mb-3 text-gray-700">➕ Добавить прием пищи</h3>
+                            <div class="space-y-3">
+                                <textarea
+                                    v-model="mealInput"
+                                    placeholder="Например: куриная грудка 150г, рис 70г, салат 100г"
+                                    rows="3"
+                                    class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-green-500 resize-none"
+                                    :disabled="analyzing"
+                                ></textarea>
+                                <button
+                                    @click="analyzeMeal"
+                                    :disabled="!mealInput.trim() || analyzing"
+                                    class="w-full py-3 bg-gradient-to-r from-green-500 to-blue-500 text-white rounded-xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg transition-all"
+                                >
+                                    <span v-if="analyzing">⏳ Анализирую...</span>
+                                    <span v-else>🔍 Проанализировать</span>
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-3 flex items-center gap-1">
+                                <span>💡</span>
+                                <span>AI рассчитает калории и БЖУ автоматически</span>
+                            </p>
+                        </div>
+
+                        <!-- Meals List -->
+                        <div class="space-y-3">
+                            <h3 class="text-sm font-bold text-gray-700 px-1">📝 Приемы пищи</h3>
+                            <div v-if="meals.length === 0" class="text-center py-12 bg-white rounded-2xl">
+                                <div class="text-6xl mb-3">🍽️</div>
+                                <p class="text-gray-400">Пока нет записей</p>
+                            </div>
+                            <div v-else class="space-y-3">
+                                <div v-for="meal in meals" :key="meal.id" 
+                                     class="bg-white rounded-xl shadow-md p-4 hover:shadow-lg transition-shadow">
+                                    <div class="flex items-start justify-between mb-2">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-sm text-gray-500">{{ formatTime(meal.timestamp) }}</span>
+                                            <span class="px-2 py-1 bg-green-100 text-green-700 rounded-lg text-sm font-semibold">
+                                                {{ meal.calories }} ккал
+                                            </span>
+                                        </div>
+                                        <button 
+                                            @click="deleteMeal(meal.id)"
+                                            class="text-red-400 hover:text-red-600 transition-colors"
+                                        >
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <p class="text-gray-700 mb-2">{{ meal.text }}</p>
+                                    <div class="flex gap-4 text-sm text-gray-600">
+                                        <span>Б: {{ meal.proteins.toFixed(1) }}г</span>
+                                        <span>Ж: {{ meal.fats.toFixed(1) }}г</span>
+                                        <span>У: {{ meal.carbs.toFixed(1) }}г</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stats Tab -->
+                    <div v-else-if="activeTab === 'stats'" key="stats" class="space-y-4">
+                        <div class="bg-white rounded-2xl shadow-lg p-6">
+                            <h2 class="text-lg font-bold mb-4 text-gray-800">📈 Статистика за неделю</h2>
+                            <div class="text-center py-12 text-gray-400">
+                                <div class="text-6xl mb-3">📊</div>
+                                <p>Графики в разработке</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Challenges Tab -->
+                    <div v-else-if="activeTab === 'challenges'" key="challenges" class="space-y-4">
+                        <div class="bg-white rounded-2xl shadow-lg p-6">
+                            <h2 class="text-lg font-bold mb-4 text-gray-800">⚡ Челленджи</h2>
+                            <div class="space-y-4">
+                                <div v-for="challenge in challengesList" :key="challenge.id"
+                                     class="p-4 border-2 border-gray-200 rounded-xl hover:border-green-500 transition-colors cursor-pointer">
+                                    <div class="flex items-center justify-between mb-3">
+                                        <div class="flex items-center gap-3">
+                                            <span class="text-3xl">{{ challenge.icon }}</span>
+                                            <div>
+                                                <div class="font-semibold text-gray-800">{{ challenge.title }}</div>
+                                                <div class="text-xs text-gray-500">{{ challenge.description }}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center gap-3">
+                                        <div class="flex-1 h-3 bg-gray-200 rounded-full overflow-hidden">
+                                            <div 
+                                                class="h-full bg-gradient-to-r from-green-500 to-blue-500 transition-all"
+                                                :style="{ width: (challenge.progress / challenge.total * 100) + '%' }"
+                                            ></div>
+                                        </div>
+                                        <span class="text-sm font-semibold text-gray-600">
+                                            {{ challenge.progress }}/{{ challenge.total }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Plan Tab -->
+                    <div v-else key="plan" class="space-y-4">
+                        <div class="bg-white rounded-2xl shadow-lg p-6">
+                            <h2 class="text-lg font-bold mb-4 text-gray-800">🎯 План питания</h2>
+                            <button
+                                @click="createPlan"
+                                class="w-full py-4 bg-gradient-to-r from-green-500 to-blue-500 text-white rounded-xl font-semibold hover:shadow-lg transition-all"
+                            >
+                                🚀 Создать персональный план
+                            </button>
+                        </div>
+                    </div>
+                </transition>
+            </main>
+
+            <!-- Bottom Navigation -->
+            <nav class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-2 py-2 safe-area-bottom">
+                <div class="flex justify-around">
+                    <button
+                        v-for="tab in tabs"
+                        :key="tab.id"
+                        @click="activeTab = tab.id"
+                        :class="[
+                            'flex flex-col items-center gap-1 py-2 px-4 rounded-xl transition-all',
+                            activeTab === tab.id 
+                                ? 'text-green-600 bg-green-50 font-semibold' 
+                                : 'text-gray-500'
+                        ]"
+                    >
+                        <span class="text-2xl">{{ tab.icon }}</span>
+                        <span class="text-xs">{{ tab.label }}</span>
+                    </button>
+                </div>
+            </nav>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+        
+        const API_URL = 'https://your-api-url.com/api'; // Замените на ваш API URL
+        
+        createApp({
+            data() {
+                return {
+                    loading: true,
+                    activeTab: 'diary',
+                    user: {},
+                    labsCredits: 0,
+                    achievements: 0,
+                    meals: [],
+                    stats: { calories: 0, proteins: 0, fats: 0, carbs: 0 },
+                    mealInput: '',
+                    analyzing: false,
+                    tabs: [
+                        { id: 'diary', label: 'Дневник', icon: '🍽️' },
+                        { id: 'plan', label: 'План', icon: '🎯' },
+                        { id: 'challenges', label: 'Челленджи', icon: '⚡' },
+                        { id: 'stats', label: 'Статистика', icon: '📊' }
+                    ],
+                    challengesList: [
+                        { id: 1, icon: '💧', title: 'Пить 2л воды', description: 'Ежедневно', progress: 3, total: 7 },
+                        { id: 2, icon: '🏃', title: '8000 шагов', description: 'Каждый день', progress: 5, total: 7 },
+                        { id: 3, icon: '🥗', title: 'Здоровое питание', description: '7 дней подряд', progress: 2, total: 7 }
+                    ]
+                }
+            },
+            async mounted() {
+                // Инициализация Telegram WebApp
+                const tg = window.Telegram?.WebApp;
+                if (tg) {
+                    tg.ready();
+                    tg.expand();
+                    tg.MainButton.hide();
+                    
+                    // Применяем тему Telegram
+                    this.applyTelegramTheme(tg);
+                }
+                
+                await this.loadData();
+                this.loading = false;
+            },
+            methods: {
+                applyTelegramTheme(tg) {
+                    const theme = tg.themeParams;
+                    document.documentElement.style.setProperty('--tg-theme-bg-color', theme.bg_color || '#ffffff');
+                    document.documentElement.style.setProperty('--tg-theme-text-color', theme.text_color || '#000000');
+                },
+                
+                async loadData() {
+                    // Демо данные для примера
+                    this.user = { first_name: 'Иван', id: 123456789 };
+                    this.labsCredits = 3;
+                    this.achievements = 5;
+                    
+                    // Загрузка приемов пищи
+                    this.meals = [
+                        {
+                            id: 1,
+                            timestamp: new Date().toISOString(),
+                            text: 'Овсянка 100г, банан 120г',
+                            calories: 350,
+                            proteins: 12.5,
+                            fats: 8.2,
+                            carbs: 58.3
+                        }
+                    ];
+                    
+                    this.calculateStats();
+                },
+                
+                calculateStats() {
+                    this.stats = this.meals.reduce((acc, meal) => {
+                        acc.calories += meal.calories;
+                        acc.proteins += meal.proteins;
+                        acc.fats += meal.fats;
+                        acc.carbs += meal.carbs;
+                        return acc;
+                    }, { calories: 0, proteins: 0, fats: 0, carbs: 0 });
+                },
+                
+                async analyzeMeal() {
+                    if (!this.mealInput.trim()) return;
+                    
+                    this.analyzing = true;
+                    const tg = window.Telegram?.WebApp;
+                    
+                    try {
+                        // Имитация анализа AI
+                        await new Promise(resolve => setTimeout(resolve, 1500));
+                        
+                        const newMeal = {
+                            id: Date.now(),
+                            timestamp: new Date().toISOString(),
+                            text: this.mealInput,
+                            calories: Math.floor(Math.random() * 300 + 200),
+                            proteins: Math.floor(Math.random() * 20 + 10),
+                            fats: Math.floor(Math.random() * 15 + 5),
+                            carbs: Math.floor(Math.random() * 40 + 20)
+                        };
+                        
+                        this.meals.unshift(newMeal);
+                        this.calculateStats();
+                        this.mealInput = '';
+                        
+                        if (tg) {
+                            tg.HapticFeedback.notificationOccurred('success');
+                            tg.showPopup({
+                                title: 'Готово! ✅',
+                                message: `Добавлено: ${newMeal.calories} ккал`,
+                                buttons: [{ type: 'ok' }]
+                            });
+                        }
+                    } catch (error) {
+                        console.error('Error:', error);
+                        if (tg) {
+                            tg.showAlert('Ошибка при анализе. Попробуйте еще раз.');
+                        }
+                    } finally {
+                        this.analyzing = false;
+                    }
+                },
+                
+                deleteMeal(mealId) {
+                    const tg = window.Telegram?.WebApp;
+                    if (tg) {
+                        tg.HapticFeedback.impactOccurred('medium');
+                    }
+                    
+                    this.meals = this.meals.filter(m => m.id !== mealId);
+                    this.calculateStats();
+                },
+                
+                formatTime(timestamp) {
+                    const date = new Date(timestamp);
+                    return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+                },
+                
+                createPlan() {
+                    const tg = window.Telegram?.WebApp;
+                    if (tg) {
+                        tg.showAlert('Функция в разработке! Скоро будет доступна.');
+                    }
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
